@@ -1,0 +1,79 @@
+# Amelia Voice – all operations via Task (https://taskfile.dev)
+version: '3'
+
+vars:
+  BACKEND_PORT: '8000'
+  FRONTEND_PORT: '5173'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  # --- Install ---
+  install:
+    desc: Install backend (uv) and frontend (npm) dependencies
+    cmds:
+      - task: install-backend
+      - task: install-frontend
+
+  install-backend:
+    desc: Install backend Python dependencies with uv
+    cmds:
+      - uv sync
+
+  install-frontend:
+    desc: Install frontend npm dependencies
+    dir: frontend
+    cmds:
+      - npm install
+
+  # --- Run ---
+  backend:
+    desc: Run FastAPI backend (port {{.BACKEND_PORT}})
+    cmds:
+      - uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port {{.BACKEND_PORT}}
+
+  frontend:
+    desc: Run Vite frontend dev server (port {{.FRONTEND_PORT}})
+    dir: frontend
+    cmds:
+      - npm run dev
+
+  dev:
+    desc: Run backend and frontend (backend in background, frontend in foreground; Ctrl+C stops both)
+    cmds:
+      - uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port {{.BACKEND_PORT}} &
+      - cd frontend && npm run dev
+
+  # --- Build ---
+  build:
+    desc: Build frontend for production
+    dir: frontend
+    cmds:
+      - npm run build
+
+  build-backend:
+    desc: Verify backend package installs (uv sync)
+    cmds:
+      - uv sync
+
+  # --- Lint / Check ---
+  lint-frontend:
+    desc: Lint frontend
+    dir: frontend
+    cmds:
+      - npm run lint
+
+  check:
+    desc: Run install-backend and build (quick sanity check)
+    cmds:
+      - task: install-backend
+      - task: build
+
+  # --- Twilio (Phase 3) ---
+  webhook:
+    desc: Expose backend via ngrok so Twilio can reach /voice/incoming and /voice/stream (set TWILIO_VOICE_WEBHOOK_URL to the https URL ngrok shows)
+    cmds:
+      - ngrok http {{.BACKEND_PORT}}
