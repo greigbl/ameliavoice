@@ -1,6 +1,5 @@
 import { useTranslation } from 'react-i18next'
 import Box from '@mui/material/Box'
-import Chip from '@mui/material/Chip'
 import Paper from '@mui/material/Paper'
 import TextField from '@mui/material/TextField'
 import IconButton from '@mui/material/IconButton'
@@ -107,18 +106,14 @@ export function ChatArea() {
                 {m.content}
               </Typography>
               {m.role === 'assistant' && m.latency && (
-                <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                  <Chip size="small" label={`STT ${m.latency.stt_ms} ms`} variant="outlined" sx={{ fontSize: '0.75rem' }} />
-                  <Chip size="small" label={`LLM ${m.latency.llm_ms} ms`} variant="outlined" sx={{ fontSize: '0.75rem' }} />
-                  <Chip size="small" label={`TTS ${m.latency.tts_ms} ms`} variant="outlined" sx={{ fontSize: '0.75rem' }} />
-                  <Chip
-                    size="small"
-                    label={`Total ${m.latency.stt_ms + m.latency.llm_ms + m.latency.tts_ms} ms`}
-                    color="primary"
-                    variant="filled"
-                    sx={{ fontSize: '0.75rem' }}
-                  />
-                </Box>
+                <Typography variant="caption" sx={{ mt: 1.5, display: 'block' }}>
+                  <Typography component="span" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+                    STT {m.latency.stt_ms} ms | LLM {m.latency.llm_ms} ms | TTS {m.latency.tts_ms} ms
+                  </Typography>
+                  <Typography component="span" sx={{ color: 'primary.main', fontWeight: 600, fontSize: '0.75rem' }}>
+                    {' | '}Total {m.latency.stt_ms + m.latency.llm_ms + m.latency.tts_ms} ms
+                  </Typography>
+                </Typography>
               )}
             </Paper>
           </Box>

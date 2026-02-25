@@ -142,6 +142,10 @@ The bot is in **continuous mode**: multiple turns until the caller hangs up (spe
 - The webhook URL in Twilio is exactly `https://YOUR-NGROK-URL/voice/incoming` (same as `TWILIO_VOICE_WEBHOOK_URL` + `/voice/incoming`).
 - For local debugging only you can set `TWILIO_SKIP_VALIDATION=1` in `.env` to skip the check (do not use in production).
 
+**If you get Twilio error 31920 (Stream - WebSocket - Handshake Error):** Twilio could not complete the WebSocket handshake (server must return HTTP 101). Common causes:
+- **Wrong stream URL:** The backend builds the Media Stream URL from `TWILIO_VOICE_WEBHOOK_URL` using only the **origin** (scheme + host, no path). So set `TWILIO_VOICE_WEBHOOK_URL=https://YOUR-NGROK-URL` (no path). The stream URL will be `wss://YOUR-NGROK-URL/voice/stream`. If you had a path (e.g. `/voice/incoming`) in the env, the stream URL would have been wrong and Twilio would get 404 → handshake error.
+- **Tunnel/proxy:** Ensure your tunnel (ngrok, etc.) supports WebSocket and forwards `Upgrade` and `Connection` headers. Check backend logs: you should see "Twilio Media Stream WebSocket: handshake starting" when Twilio connects; if not, the WebSocket request is not reaching the server.
+
 ---
 
 ## 8. Twilio console (reference)

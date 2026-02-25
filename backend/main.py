@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import tempfile
+from urllib.parse import urlparse, urlunparse
 
 try:
     from dotenv import load_dotenv
@@ -214,16 +215,16 @@ async def text_to_speech_get(
 
 
 def _twilio_stream_url() -> str:
-    base = os.getenv("TWILIO_VOICE_WEBHOOK_URL", "").rstrip("/")
+    """Build WSS URL for Twilio Media Stream using only the origin of TWILIO_VOICE_WEBHOOK_URL (no path)."""
+    base = (os.getenv("TWILIO_VOICE_WEBHOOK_URL") or "").strip().rstrip("/")
     if not base:
         base = "https://localhost:8000"
-    if base.startswith("https://"):
-        wss = "wss://" + base[len("https://") :]
-    elif base.startswith("http://"):
-        wss = "ws://" + base[len("http://") :]
-    else:
-        wss = "wss://" + base
-    return f"{wss}/voice/stream"
+    parsed = urlparse(base if "://" in base else "https://" + base)
+    netloc = parsed.netloc or parsed.path
+    scheme = "wss" if (parsed.scheme or "https") == "https" else "ws"
+    origin = urlunparse((scheme, netloc, "", "", "", ""))
+    stream_url = f"{origin}/voice/stream"
+    return stream_url
 
 
 @app.post("/voice/incoming")
@@ -261,6 +262,7 @@ async def voice_incoming(request: Request):
             return Response(content="Forbidden", status_code=403)
 
     stream_url = _twilio_stream_url()
+    logger.info("Twilio voice incoming: returning TwiML with Stream url=%s", stream_url)
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         f'<Response><Connect><Stream url="{stream_url}"/></Connect></Response>'
@@ -271,7 +273,9 @@ async def voice_incoming(request: Request):
 @app.websocket("/voice/stream")
 async def voice_stream(websocket: WebSocket):
     """Twilio Media Stream WebSocket: receive inbound μ-law, run ASR → chat → TTS, send media back."""
+    logger.info("Twilio Media Stream WebSocket: handshake starting")
     await websocket.accept()
+    logger.info("Twilio Media Stream WebSocket: handshake complete")
     stt = get_stt()
     tts = get_tts()
     if not stt.is_available() or not tts.is_available():
@@ -424,6 +428,7 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY not set")
     try:
         from openai import OpenAI
+        #from openai import AzureOpenAI
         client = OpenAI(api_key=api_key)
         lang = (req.language or "en").strip().lower()
         if lang not in ("ja", "en"):

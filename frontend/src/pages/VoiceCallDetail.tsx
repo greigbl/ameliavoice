@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
-import Chip from '@mui/material/Chip'
 import Paper from '@mui/material/Paper'
 import Typography from '@mui/material/Typography'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -40,17 +39,14 @@ function TurnRow({ turn }: { turn: VoiceCallTurn }) {
         <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
           {turn.assistant_text || '—'}
         </Typography>
-        <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-          <Chip size="small" label={`STT ${turn.stt_ms} ms`} variant="outlined" />
-          <Chip size="small" label={`LLM ${turn.llm_ms} ms`} variant="outlined" />
-          <Chip size="small" label={`TTS ${turn.tts_ms} ms`} variant="outlined" />
-          <Chip
-            size="small"
-            label={`Total ${(turn.stt_ms + turn.llm_ms + turn.tts_ms).toFixed(0)} ms`}
-            color="primary"
-            variant="filled"
-          />
-        </Box>
+        <Typography variant="caption" sx={{ mt: 1.5, display: 'block' }}>
+          <Typography component="span" sx={{ color: 'text.secondary' }}>
+            STT {turn.stt_ms} ms | LLM {turn.llm_ms} ms | TTS {turn.tts_ms} ms
+          </Typography>
+          <Typography component="span" sx={{ color: 'primary.main', fontWeight: 600 }}>
+            {' | '}Total {(turn.stt_ms + turn.llm_ms + turn.tts_ms).toFixed(0)} ms
+          </Typography>
+        </Typography>
       </Paper>
     </Box>
   )
@@ -82,25 +78,22 @@ function CurrentTurnRow({ turn }: { turn: CurrentTurnPartial }) {
           {hasAgent ? turn.assistant_text : '…'}
         </Typography>
         {(turn.stt_ms != null || turn.llm_ms != null || turn.tts_ms != null) && (
-          <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {turn.stt_ms != null && (
-              <Chip size="small" label={`STT ${turn.stt_ms} ms`} variant="outlined" />
-            )}
-            {turn.llm_ms != null && (
-              <Chip size="small" label={`LLM ${turn.llm_ms} ms`} variant="outlined" />
-            )}
-            {turn.tts_ms != null && (
-              <Chip size="small" label={`TTS ${turn.tts_ms} ms`} variant="outlined" />
-            )}
+          <Typography variant="caption" sx={{ mt: 1.5, display: 'block' }}>
+            <Typography component="span" sx={{ color: 'text.secondary' }}>
+              {[
+                turn.stt_ms != null && `STT ${turn.stt_ms} ms`,
+                turn.llm_ms != null && `LLM ${turn.llm_ms} ms`,
+                turn.tts_ms != null && `TTS ${turn.tts_ms} ms`,
+              ]
+                .filter(Boolean)
+                .join(' | ')}
+            </Typography>
             {hasLatency && (
-              <Chip
-                size="small"
-                label={`Total ${totalMs.toFixed(0)} ms`}
-                color="primary"
-                variant="filled"
-              />
+              <Typography component="span" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                {turn.stt_ms != null || turn.llm_ms != null || turn.tts_ms != null ? ' | ' : ''}Total {totalMs.toFixed(0)} ms
+              </Typography>
             )}
-          </Box>
+          </Typography>
         )}
       </Paper>
     </Box>

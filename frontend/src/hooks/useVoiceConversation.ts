@@ -7,7 +7,8 @@ import { stripMarkdownForTTS } from '../utils/stripMarkdown'
 // Voice activity: only auto-send after user has spoken, then paused (silence).
 const SILENCE_RMS_THRESHOLD = 0.015   // below this = silence (time-domain RMS 0–1)
 const SPEECH_RMS_THRESHOLD = 0.025   // above this = speaking (so we set hasSpoken)
-const BARGE_IN_RMS_THRESHOLD = 0.02  // above this while TTS playing = user interrupting, stop TTS
+const BARGE_IN_ENABLED = false       // when true, mic above threshold stops TTS; set false to avoid TTS stopping from noise
+const BARGE_IN_RMS_THRESHOLD = 0.02  // above this while TTS playing = user interrupting, stop TTS (only if BARGE_IN_ENABLED)
 const SILENCE_MS = 1000              // pause duration to trigger send (1 second)
 const MIN_RECORDING_MS = 600         // minimum recording length before we accept silence
 
@@ -45,9 +46,9 @@ export function useVoiceConversation() {
     let sumSq = 0
     for (let i = 0; i < data.length; i++) sumSq += data[i] * data[i]
     const rms = Math.sqrt(sumSq / data.length)
-    // Barge-in: user started speaking while TTS is playing → stop TTS
+    // Barge-in: when enabled, user speaking over TTS stops playback (disabled by default to avoid TTS cutting off from noise)
     const tts = currentTTSRef.current
-    if (tts && rms > BARGE_IN_RMS_THRESHOLD) {
+    if (BARGE_IN_ENABLED && tts && rms > BARGE_IN_RMS_THRESHOLD) {
       tts.audio.pause()
       tts.audio.currentTime = 0
       URL.revokeObjectURL(tts.url)
@@ -161,6 +162,7 @@ export function useVoiceConversation() {
       const userText = result.text?.trim()
       if (!userText) {
         setIsProcessing(false)
+        if (continuous) doRestart()
         return
       }
       addMessage({ role: 'user', content: userText })
@@ -197,6 +199,9 @@ export function useVoiceConversation() {
             userRequestedStopRef.current = true
             stopRecordingAndSendRef.current?.fn()
           })
+        } else if (continuous) {
+          const rec = recorderRef.current
+          if (!rec || rec.state !== 'recording') doRestart()
         }
       }
       if (endConversation) {
