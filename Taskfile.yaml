@@ -18,6 +18,19 @@ tasks:
       - task: install-backend
       - task: install-frontend
 
+  install-uv:
+    desc: 'Install uv (Python package manager) - run once if uv not in PATH'
+    cmds:
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - |
+        echo 'For this terminal only, run: export PATH="$HOME/.local/bin:$PATH"'
+      - |
+        echo 'To have uv in every new terminal, add that export line to:'
+      - |
+        [ -n "$BASH_VERSION" ] && echo "  $HOME/.bashrc" || [ -n "$ZSH_VERSION" ] && echo "  $HOME/.zshrc" || echo "  your shell config file (e.g. .bashrc or .zshrc)"
+      - |
+        echo 'Then run: source ~/.bashrc   (or source ~/.zshrc), or open a new terminal. Then: task install'
+
   install-backend:
     desc: Install backend Python dependencies with uv
     cmds:
@@ -36,16 +49,18 @@ tasks:
       - uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port {{.BACKEND_PORT}}
 
   frontend:
-    desc: Run Vite frontend dev server (port {{.FRONTEND_PORT}})
+    desc: Run Vite frontend dev server (port {{.FRONTEND_PORT}}, listen on 0.0.0.0 for remote)
     dir: frontend
+    env:
+      VITE_PROXY_TARGET: 'http://localhost:{{.BACKEND_PORT}}'
     cmds:
-      - npm run dev
+      - npm run dev -- --host
 
   dev:
     desc: Run backend and frontend (backend in background, frontend in foreground; Ctrl+C stops both)
     cmds:
       - uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port {{.BACKEND_PORT}} &
-      - cd frontend && npm run dev
+      - cd frontend && VITE_PROXY_TARGET=http://localhost:{{.BACKEND_PORT}} npm run dev -- --host
 
   # --- Build ---
   build:

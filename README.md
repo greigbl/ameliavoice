@@ -4,7 +4,7 @@ Voice conversation app (Phase 1): Google ASR and TTS, OpenAI chat.
 
 ## Prerequisites
 
-- **Backend:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
+- **Backend:** Python 3.11+, [uv](https://docs.astral.sh/uv/) (if `uv` not found: `task install-uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh` then add `~/.local/bin` to PATH)
 - **Frontend:** Node 18+
 - **Task:** [Task](https://taskfile.dev/) (optional; all operations can be run via Task)
 - **Env:** Create `.env` in project root with:

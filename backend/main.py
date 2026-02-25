@@ -19,7 +19,8 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.google_stt_service import GoogleSTTService
@@ -43,6 +44,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Path to built frontend (so we can serve it from backend when behind a proxy)
+_FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
 
 # Lazy-init services (STT provider: google | whisper via STT_PROVIDER)
 _stt_service: Optional[object] = None
@@ -106,7 +110,7 @@ class TTSRequest(BaseModel):
 
 @app.api_route("/", methods=["GET", "POST"])
 async def root(request: Request):
-    """Root has no handler. If Twilio is hitting POST /, set the voice webhook to /voice/incoming."""
+    """Root: POST = Twilio hint. GET = API info or serve built frontend if frontend/dist exists."""
     if request.method == "POST":
         logger.warning("Received POST / (likely Twilio). Set voice webhook to https://your-host/voice/incoming")
         return Response(
@@ -114,6 +118,10 @@ async def root(request: Request):
             status_code=404,
             media_type="text/plain",
         )
+    if os.path.isdir(_FRONTEND_DIST):
+        index_path = os.path.join(_FRONTEND_DIST, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
     return {"message": "Amelia Voice API", "docs": "/docs", "voice_webhook": "/voice/incoming"}
 
 
@@ -485,6 +493,21 @@ async def voice_calls_live_ws(websocket: WebSocket):
         pass
     finally:
         voice_calls_live.unsubscribe(websocket)
+
+
+# --- Serve built frontend (when frontend/dist exists) so one URL works behind a proxy ---
+if os.path.isdir(_FRONTEND_DIST):
+    app.mount("/assets", StaticFiles(directory=os.path.join(_FRONTEND_DIST, "assets")), name="frontend-assets")
+
+    @app.get("/{full_path:path}")
+    def serve_spa(full_path: str):
+        """Serve index.html for SPA client routes (e.g. /calls). Skip API/docs/assets."""
+        if full_path.startswith(("api/", "voice/", "docs", "openapi.json", "redoc", "assets/")):
+            raise HTTPException(status_code=404, detail="Not found")
+        index_path = os.path.join(_FRONTEND_DIST, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 if __name__ == "__main__":

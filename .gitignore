@@ -18,6 +18,10 @@ frontend/node_modules/
 # Build / output
 frontend/dist/
 *.local
+
+# Google Cloud service account keys (never commit)
+speech2text-ja-e0aa6d1f9eb3.json
+*credentials*.json
 .env
 .env.local
 .env.*.local
