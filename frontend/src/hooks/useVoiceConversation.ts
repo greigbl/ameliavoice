@@ -241,6 +241,12 @@ export function useVoiceConversation() {
   const startListening = useCallback(async () => {
     userRequestedStopRef.current = false
     setError(null)
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError(
+        'Microphone access is not available. Use HTTPS or open the app from localhost (browsers block microphone on plain HTTP from other hosts).'
+      )
+      return
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
