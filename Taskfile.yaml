@@ -62,6 +62,16 @@ tasks:
       - uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port {{.BACKEND_PORT}} &
       - cd frontend && VITE_PROXY_TARGET=http://localhost:{{.BACKEND_PORT}} npm run dev -- --host
 
+  # Run backend only, serving built frontend from frontend/dist. Use this when
+  # accessing from another machine (e.g. http://YOUR_VM_IP:8000/) to avoid
+  # Vite dev server / proxy MIME issues.
+  serve:
+    desc: Build frontend and run backend only (single origin; open http://HOST:{{.BACKEND_PORT}}/)
+    deps:
+      - build
+    cmds:
+      - task: backend
+
   # --- Build ---
   build:
     desc: Build frontend for production
