@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from backend.google_stt_service import GoogleSTTService
 from backend.whisper_stt_service import WhisperSTTService
 from backend.tts_service import TTSService
-from backend.audio_utils import ensure_wav_format
+from backend.audio_utils import AudioConversionError, ensure_wav_format
 from backend.twilio_stream import handle_twilio_stream
 from backend import voice_calls
 from backend import voice_calls_live
@@ -188,6 +188,8 @@ async def transcribe(
             language=result.get("language", lang_code),
             model=model,
         )
+    except AudioConversionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -360,7 +362,7 @@ async def chat(req: ChatRequest):
         query = (last.content or "").strip()
         history_list = [{"role": (m.role or "user"), "content": (m.content or "")} for m in req.messages[:-1]]
         passthru_url = (os.getenv("CHAT_PASSTHRU_URL") or "http://localhost:8000/chat").strip()
-        body = {"query": query, "history": history_list, "source": "voice"}
+        body = {"query": query + "５０文字以内に答えてください。", "history": history_list, "source": "voice"}
 
         def _do_passthru() -> dict:
             import urllib.request

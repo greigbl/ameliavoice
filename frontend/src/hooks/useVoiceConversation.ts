@@ -212,7 +212,8 @@ export function useVoiceConversation() {
         await audio.play()
       } else if (continuous) {
         audio.play()
-        doRestart()
+        // Do not restart recording here — wait for TTS to finish (audio.onended).
+        // Otherwise the mic picks up speaker output and STT transcribes the assistant's voice.
       } else {
         await audio.play()
         doRestart()

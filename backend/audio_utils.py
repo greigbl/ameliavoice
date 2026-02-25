@@ -8,6 +8,24 @@ from pydub import AudioSegment
 
 logger = logging.getLogger(__name__)
 
+# EBML/WebM magic bytes (valid webm starts with these)
+WEBM_HEADER = bytes([0x1A, 0x45, 0xDF, 0xA3])
+
+
+class AudioConversionError(Exception):
+    """Raised when audio cannot be converted (e.g. corrupt or unsupported file)."""
+    pass
+
+
+def _validate_webm(path: str) -> None:
+    """Raise AudioConversionError if file does not look like valid WebM (e.g. truncated)."""
+    with open(path, "rb") as f:
+        header = f.read(4)
+    if len(header) < 4 or header != WEBM_HEADER:
+        raise AudioConversionError(
+            "Invalid or truncated WebM file (bad EBML header). Please try recording again."
+        )
+
 
 def convert_audio_to_wav(input_path: str, output_path: str = None, sample_rate: int = 16000) -> str:
     """
@@ -22,7 +40,7 @@ def convert_audio_to_wav(input_path: str, output_path: str = None, sample_rate: 
         Path to converted WAV file
     """
     try:
-        # Load audio file
+        # Load audio file (pydub uses ffmpeg; corrupt webm can cause EBML/decoding errors)
         audio = AudioSegment.from_file(input_path)
         
         # Convert to mono if stereo
@@ -47,7 +65,7 @@ def convert_audio_to_wav(input_path: str, output_path: str = None, sample_rate: 
         
         # Verify the output file exists and has content
         if not os.path.exists(output_path):
-            raise ValueError(f"Conversion failed: output file not created: {output_path}")
+            raise AudioConversionError(f"Conversion failed: output file not created: {output_path}")
         
         output_size = os.path.getsize(output_path)
         if output_size < 1000:  # WAV header is ~44 bytes, need some audio data
@@ -56,10 +74,13 @@ def convert_audio_to_wav(input_path: str, output_path: str = None, sample_rate: 
         logger.info(f"Converted {input_path} to {output_path} ({sample_rate}Hz, mono, {output_size} bytes)")
         return output_path
         
+    except AudioConversionError:
+        raise
     except Exception as e:
-        logger.error(f"Audio conversion error: {e}")
-        # If conversion fails, return original path (might already be in correct format)
-        return input_path
+        logger.error("Audio conversion error: %s", e)
+        raise AudioConversionError(
+            "Could not decode audio (file may be corrupted or unsupported). Try recording again."
+        ) from e
 
 
 def ensure_wav_format(audio_path: str) -> str:
@@ -71,6 +92,9 @@ def ensure_wav_format(audio_path: str) -> str:
     
     Returns:
         Path to WAV file (may be original or converted)
+    
+    Raises:
+        AudioConversionError: If file is not valid WAV and conversion fails (e.g. corrupt webm).
     """
     ext = Path(audio_path).suffix.lower()
     
@@ -79,5 +103,9 @@ def ensure_wav_format(audio_path: str) -> str:
         # Could check sample rate here, but for now just return
         return audio_path
     
-    # Convert to WAV
+    # Optional: validate webm before conversion to fail fast with a clear message
+    if ext in ('.webm', '.mkv'):
+        _validate_webm(audio_path)
+    
+    # Convert to WAV (raises AudioConversionError on failure)
     return convert_audio_to_wav(audio_path)
