@@ -371,6 +371,7 @@ async def chat(req: ChatRequest):
                 data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST",
+                source="voice"
             )
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return _json.loads(resp.read().decode())
