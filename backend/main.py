@@ -357,10 +357,10 @@ async def chat(req: ChatRequest):
         last = req.messages[-1]
         if last.role != "user":
             raise HTTPException(status_code=400, detail="last message must be from user (query)")
-        query = last.content
-        history_list = [{"role": m.role, "content": m.content} for m in req.messages[:-1]]
-        passthru_url = (os.getenv("CHAT_PASSTHRU_URL") or "http://localhost:8000/api/chat").strip()
-        body = {"query": query, "history": history_list}
+        query = (last.content or "").strip()
+        history_list = [{"role": (m.role or "user"), "content": (m.content or "")} for m in req.messages[:-1]]
+        passthru_url = (os.getenv("CHAT_PASSTHRU_URL") or "http://localhost:8000/chat").strip()
+        body = {"query": query, "history": history_list, "source": "voice"}
 
         def _do_passthru() -> dict:
             import urllib.request
@@ -371,10 +371,19 @@ async def chat(req: ChatRequest):
                 data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST",
-                source="voice"
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return _json.loads(resp.read().decode())
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return _json.loads(resp.read().decode())
+            except urllib.error.HTTPError as err:
+                body_err = ""
+                if err.fp:
+                    try:
+                        body_err = err.fp.read().decode()
+                    except Exception:
+                        pass
+                err.remote_detail = body_err  # type: ignore[attr-defined]
+                raise
 
         try:
             result = await asyncio.to_thread(_do_passthru)
@@ -385,6 +394,11 @@ async def chat(req: ChatRequest):
                 end_conversation=False,
             )
         except Exception as e:
+            remote_detail = getattr(e, "remote_detail", None)
+            if remote_detail:
+                logger.exception("Passthru chat error (remote 422 detail): %s", remote_detail)
+                detail_msg = f"Passthru failed: remote returned validation error. Ensure remote expects body {{'query', 'history'}} (e.g. use CHAT_PASSTHRU_URL=.../api/chat/query if applicable). {str(remote_detail)[:400]}"
+                raise HTTPException(status_code=502, detail=detail_msg)
             logger.exception("Passthru chat error: %s", e)
             raise HTTPException(status_code=502, detail=f"Passthru failed: {e!s}")
 
