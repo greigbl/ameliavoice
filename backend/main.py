@@ -2,10 +2,10 @@
 Voice conversation app - Phase 1: Google ASR and TTS, OpenAI chat.
 """
 import asyncio
-import json
 import logging
 import os
 import tempfile
+import time
 from urllib.parse import urlparse, urlunparse
 
 try:
@@ -30,7 +30,7 @@ from backend.audio_utils import ensure_wav_format
 from backend.twilio_stream import handle_twilio_stream
 from backend import voice_calls
 from backend import voice_calls_live
-from backend.voice_prompt import build_voice_system_message
+from backend import utils
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -79,6 +79,9 @@ def get_tts():
 class ChatMessage(BaseModel):
     role: str  # "user" | "assistant" | "system"
     content: str
+class ChatRequestX(BaseModel):
+    query: str
+    history: list[ChatMessage]
 
 
 class ChatRequest(BaseModel):
@@ -92,6 +95,18 @@ class ChatResponse(BaseModel):
     message: ChatMessage
     done: bool = True
     end_conversation: bool = False  # agent invoked end_conversation tool; client should stop listening
+
+
+class ChatQueryRequest(BaseModel):
+    """RAG-style chat: single query + history. Used by POST /api/chat/query."""
+    query: str
+    history: list[ChatMessage] = []
+
+
+class ChatQueryResponse(BaseModel):
+    answer: str
+    sources: list[str] = []
+    intent: str = "SEARCH"
 
 
 class TranscribeResponse(BaseModel):
@@ -302,130 +317,77 @@ async def voice_stream(websocket: WebSocket):
             pass
 
 
-# --- Tavily web search (optional; requires TAVILY_API_KEY) ---
+# --- Chat: backend selected by CHAT_BACKEND (greig | fred) ---
 
-WEB_SEARCH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "web_search",
-        "description": "Search the web for current information. Use when the user asks about recent events, facts, or anything you need to look up. Provide a clear search query string.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "The search query to run (e.g. 'weather Tokyo today', 'latest news about X')"},
-            },
-            "required": ["query"],
-        },
-    },
-}
+def _chat_backend() -> str:
+    """Return CHAT_BACKEND from env: 'greig' (OpenAI with tools), 'fred' (RAG), or 'passthru'. Default greig."""
+    backend = (os.getenv("CHAT_BACKEND") or "greig").strip().lower()
+    if backend not in ("greig", "fred", "passthru"):
+        backend = "greig"
+    return backend
 
 
-def _tavily_search(query: str) -> str:
-    """Run a Tavily web search and return a string summary for the model. Uses TAVILY_API_KEY."""
-    api_key = (os.getenv("TAVILY_API_KEY") or "").strip()
-    if not api_key:
-        return "Web search is not configured (TAVILY_API_KEY not set)."
-    try:
-        from tavily import TavilyClient
-        client = TavilyClient(api_key=api_key)
-        # include_answer=True gives an LLM-generated answer; we also get results for context
-        response = client.search(query=query, search_depth="basic", max_results=5, include_answer=True)
-        parts = []
-        if response.get("answer"):
-            parts.append(response["answer"])
-        results = response.get("results") or []
-        if results:
-            parts.append("Sources:")
-            for r in results[:5]:
-                title = r.get("title") or "No title"
-                url = r.get("url") or ""
-                content = (r.get("content") or "")[:500]
-                parts.append(f"- {title} ({url}): {content}")
-        return "\n\n".join(parts) if parts else "No results found."
-    except Exception as e:
-        logger.warning("Tavily search error: %s", e)
-        return f"Web search failed: {e!s}"
-
-
-# Localized tool descriptions. Be conservative: speech recognition can mishear; only call when intent is clearly to end.
-END_CONVERSATION_TOOL_DESCRIPTIONS = {
-    "ja": "Call this ONLY when the user unambiguously says they want to end (e.g. さようなら、ありがとうございました、以上です、もう結構です). Speech recognition can mishear: if the phrase is short or could be a misheard question, do NOT call this—respond normally. When calling: reply with a brief thank you in Japanese, then call this tool.",
-    "en": "Call this ONLY when the user unambiguously says they want to end (e.g. goodbye, that's all for now, I'm done thanks, no more questions). Speech recognition can mishear: if the phrase is short or could be a misheard question, do NOT call this—respond normally. When calling: reply with a brief thank you in English, then call this tool.",
-}
-
-
-def _end_conversation_tool(lang: str):
-    """Return the end_conversation tool with description in the given language."""
-    desc = END_CONVERSATION_TOOL_DESCRIPTIONS.get(lang) or END_CONVERSATION_TOOL_DESCRIPTIONS["en"]
-    return {
-        "type": "function",
-        "function": {
-            "name": "end_conversation",
-            "description": desc,
-            "parameters": {"type": "object", "properties": {}},
-        },
-    }
-
-
-# Localized default when the model calls end_conversation but returns no content
-END_CONVERSATION_DEFAULT = {
-    "ja": "お話しできてありがとうございました。またね。",
-    "en": "Thank you for talking with me. Goodbye!",
-}
-
-def _run_chat_with_tools(client, messages: list, lang: str) -> tuple[str, bool]:
-    """Run chat completion with tools; handle tool_calls in a loop (max 5 rounds). Returns (final_content, end_conversation)."""
-    tools = [_end_conversation_tool(lang), WEB_SEARCH_TOOL]
-    end_conversation = False
-    max_rounds = 5
-    for _ in range(max_rounds):
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            max_tokens=2048,
-            tools=tools,
-            tool_choice="auto",
-        )
-        msg = resp.choices[0].message
-        content = (msg.content or "").strip()
-        tool_calls = getattr(msg, "tool_calls", None) or []
-        if not tool_calls:
-            if end_conversation and not content:
-                content = END_CONVERSATION_DEFAULT.get(lang) or END_CONVERSATION_DEFAULT["en"]
-            return content, end_conversation
-        # Append assistant message with tool_calls
-        assistant_msg = {"role": "assistant", "content": msg.content or ""}
-        assistant_msg["tool_calls"] = [
-            {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-            for tc in tool_calls
-        ]
-        messages.append(assistant_msg)
-        # Execute each tool and append results
-        for tc in tool_calls:
-            name = getattr(tc.function, "name", None) or ""
-            args_str = getattr(tc.function, "arguments", None) or "{}"
-            if name == "end_conversation":
-                end_conversation = True
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": "ok"})
-            elif name == "web_search":
-                try:
-                    args = json.loads(args_str)
-                    query = args.get("query") or ""
-                except Exception:
-                    query = args_str
-                result = _tavily_search(query)
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-            else:
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": "Unknown tool."})
-    # Max rounds reached; use last content
-    if end_conversation and not content:
-        content = END_CONVERSATION_DEFAULT.get(lang) or END_CONVERSATION_DEFAULT["en"]
-    return content or "I'm sorry, I hit a limit. Please try again.", end_conversation
-
-
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat")
 async def chat(req: ChatRequest):
-    """Chat with OpenAI. Supports end_conversation and web_search (Tavily) tools."""
+    """
+    Chat endpoint. Backend is selected by env CHAT_BACKEND:
+    - greig: OpenAI chat with end_conversation and web_search tools. Returns { message, done, end_conversation }.
+    - fred: RAG-style (classify_intent → hybrid_search/get_knowledge_summary → generate_answer). Returns { answer, sources, intent } + X-Process-Time header.
+    - passthru: POST to CHAT_PASSTHRU_URL with query + history; use only the returned answer. Returns { message, done, end_conversation }.
+    """
+    backend = _chat_backend()
+    if backend == "fred":
+        if not req.messages:
+            raise HTTPException(status_code=400, detail="messages required")
+        last = req.messages[-1]
+        if last.role != "user":
+            raise HTTPException(status_code=400, detail="last message must be from user (query)")
+        query = last.content
+        history_list = [{"role": m.role, "content": m.content} for m in req.messages[:-1]]
+        start = time.perf_counter()
+        result = utils.process_query(query, history_list)
+        elapsed = time.perf_counter() - start
+        return JSONResponse(
+            content=result,
+            headers={"X-Process-Time": f"{elapsed:.3f}"},
+        )
+    if backend == "passthru":
+        if not req.messages:
+            raise HTTPException(status_code=400, detail="messages required")
+        last = req.messages[-1]
+        if last.role != "user":
+            raise HTTPException(status_code=400, detail="last message must be from user (query)")
+        query = last.content
+        history_list = [{"role": m.role, "content": m.content} for m in req.messages[:-1]]
+        passthru_url = (os.getenv("CHAT_PASSTHRU_URL") or "http://localhost:8000/api/chat").strip()
+        body = {"query": query, "history": history_list}
+
+        def _do_passthru() -> dict:
+            import urllib.request
+            import json as _json
+            data = _json.dumps(body).encode("utf-8")
+            req = urllib.request.Request(
+                passthru_url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return _json.loads(resp.read().decode())
+
+        try:
+            result = await asyncio.to_thread(_do_passthru)
+            answer = result.get("answer") or ""
+            return ChatResponse(
+                message=ChatMessage(role="assistant", content=answer),
+                done=True,
+                end_conversation=False,
+            )
+        except Exception as e:
+            logger.exception("Passthru chat error: %s", e)
+            raise HTTPException(status_code=502, detail=f"Passthru failed: {e!s}")
+
+    # greig
     if req.integration == "amelia":
         raise HTTPException(
             status_code=501,
@@ -436,14 +398,12 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY not set")
     try:
         from openai import OpenAI
-        #from openai import AzureOpenAI
         client = OpenAI(api_key=api_key)
         lang = (req.language or "en").strip().lower()
         if lang not in ("ja", "en"):
             lang = "en"
-        system_content = build_voice_system_message(lang, verbosity=req.verbosity)
-        messages = [{"role": "system", "content": system_content}] + [{"role": m.role, "content": m.content} for m in req.messages]
-        content, end_conversation = _run_chat_with_tools(client, messages, lang)
+        messages = [{"role": m.role, "content": m.content} for m in req.messages]
+        content, end_conversation = utils.run_openai_chat(client, messages, lang, verbosity=req.verbosity)
         return ChatResponse(
             message=ChatMessage(role="assistant", content=content),
             done=True,
@@ -452,6 +412,22 @@ async def chat(req: ChatRequest):
     except Exception as e:
         logger.exception("OpenAI chat error")
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/chat/query", response_model=ChatQueryResponse)
+async def chat_query(req: ChatQueryRequest):
+    """
+    RAG-style chat: query + history -> answer, sources, intent.
+    Uses classify_intent, hybrid_search (or get_knowledge_summary for META), generate_answer.
+    """
+    start = time.perf_counter()
+    history_list = [{"role": m.role, "content": m.content} for m in req.history]
+    result = utils.process_query(req.query, history_list)
+    elapsed = time.perf_counter() - start
+    return JSONResponse(
+        content=result,
+        headers={"X-Process-Time": f"{elapsed:.3f}"},
+    )
 
 
 @app.post("/api/voice/end")

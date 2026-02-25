@@ -164,6 +164,12 @@ dev = [
     { name = "pytest" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.109.0" },
@@ -180,7 +186,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = []
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+]
 
 [[package]]
 name = "annotated-doc"

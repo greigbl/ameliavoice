@@ -172,7 +172,11 @@ export function useVoiceConversation() {
         { role: 'user', content: userText },
       ]
       const tLlm0 = performance.now()
+      //Put a call to Fred's backend here.
+      
       const chatRes = await chat(newMessages, integration, language, verbosity)
+      //BUt still need to handle object differences; request in / response out.
+      
       const llm_ms = Math.round(performance.now() - tLlm0)
       const assistantContent = chatRes.message.content
       endConversation = Boolean(chatRes.end_conversation)

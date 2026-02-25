@@ -74,7 +74,7 @@ tasks:
 
   # Same as serve but run in background (daemon). Logs to server.log; PID in .server.pid. Stop with: kill $(cat .server.pid)
   serve-daemon:
-    desc: Build frontend and run backend in background (logs: server.log; PID: .server.pid)
+    desc: "Build frontend and run backend in background (logs: server.log; PID: .server.pid)"
     deps:
       - build
     cmds:
