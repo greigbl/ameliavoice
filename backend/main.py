@@ -2,9 +2,12 @@
 Voice conversation app - Phase 1: Google ASR and TTS, OpenAI chat.
 """
 import asyncio
+import json
 import logging
 import os
+import queue
 import tempfile
+import threading
 import time
 from urllib.parse import urlparse, urlunparse
 
@@ -140,6 +143,12 @@ async def root(request: Request):
     return {"message": "Amelia Voice API", "docs": "/docs", "voice_webhook": "/voice/incoming"}
 
 
+def _stt_streaming_enabled() -> bool:
+    """True if STT_STREAMING env is true (default True)."""
+    v = (os.getenv("STT_STREAMING") or "true").strip().lower()
+    return v in ("1", "true", "yes")
+
+
 @app.get("/api/health")
 def health():
     stt = get_stt()
@@ -148,6 +157,7 @@ def health():
         "ok": True,
         "stt_available": stt.is_available(),
         "tts_available": tts.is_available(),
+        "stt_streaming": _stt_streaming_enabled(),
     }
 
 
@@ -198,6 +208,112 @@ async def transcribe(
                 os.unlink(wav_path)
             except OSError:
                 pass
+
+
+@app.websocket("/api/transcribe/stream")
+async def transcribe_stream_ws(websocket: WebSocket):
+    """
+    Streaming STT: client sends config JSON, then binary PCM (Int16 LE, 16kHz mono),
+    then {"end": true}. Server sends {"type": "interim"|"final", "text": "...", "confidence": ...}, then {"type": "done"}.
+    Only available when STT_STREAMING is true and Google STT is available.
+    """
+    await websocket.accept()
+    logger.info("STT streaming WebSocket connected")
+    if not _stt_streaming_enabled():
+        await websocket.close(code=4000, reason="STT streaming disabled (STT_STREAMING=false)")
+        return
+    stt = get_stt()
+    if not stt.is_available() or not isinstance(stt, GoogleSTTService):
+        await websocket.close(code=4000, reason="Streaming STT requires Google STT")
+        return
+    config = None
+    try:
+        # First message must be config
+        msg = await websocket.receive()
+        if "text" not in msg or not msg["text"]:
+            await websocket.close(code=4000, reason="First message must be config JSON")
+            return
+        config = json.loads(msg["text"])
+        language_code = config.get("language_code") or "ja-JP"
+        sample_rate = int(config.get("sample_rate") or 16000)
+    except (KeyError, json.JSONDecodeError, ValueError) as e:
+        logger.warning("Transcribe stream config error: %s", e)
+        await websocket.close(code=4000, reason="Invalid config JSON")
+        return
+
+    chunk_queue = queue.Queue()
+    result_queue = queue.Queue()
+
+    def chunk_iterator():
+        while True:
+            item = chunk_queue.get()
+            if item is None:
+                return
+            yield item
+
+    def run_streaming():
+        try:
+            for r in stt.streaming_recognize(
+                chunk_iterator(),
+                language_code=language_code,
+                sample_rate_hertz=sample_rate,
+            ):
+                result_queue.put(r)
+        except Exception as e:
+            logger.exception("Streaming STT error: %s", e)
+            result_queue.put({"error": str(e)})
+        finally:
+            result_queue.put(None)
+
+    thread = threading.Thread(target=run_streaming)
+    thread.start()
+
+    async def receive_loop():
+        while True:
+            msg = await websocket.receive()
+            if "bytes" in msg and msg["bytes"]:
+                chunk_queue.put(bytes(msg["bytes"]))
+            if "text" in msg and msg["text"]:
+                try:
+                    data = json.loads(msg["text"])
+                    if data.get("end") is True:
+                        chunk_queue.put(None)
+                        return
+                except json.JSONDecodeError:
+                    pass
+
+    async def send_results():
+        while True:
+            try:
+                r = result_queue.get(timeout=0.1)
+            except queue.Empty:
+                await asyncio.sleep(0.01)
+                continue
+            if r is None:
+                break
+            if isinstance(r, dict) and "error" in r:
+                await websocket.send_json({"type": "error", "detail": r["error"]})
+                break
+            is_final = r.get("is_final", False)
+            await websocket.send_json({
+                "type": "final" if is_final else "interim",
+                "text": r.get("text") or "",
+                "confidence": r.get("confidence"),
+            })
+        await websocket.send_json({"type": "done"})
+
+    try:
+        recv_task = asyncio.create_task(receive_loop())
+        send_task = asyncio.create_task(send_results())
+        await asyncio.gather(recv_task, send_task)
+    except WebSocketDisconnect:
+        chunk_queue.put(None)
+    finally:
+        thread.join(timeout=5.0)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @app.post("/api/tts")

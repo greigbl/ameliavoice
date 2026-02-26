@@ -13,6 +13,7 @@ Voice conversation app (Phase 1): Google ASR and TTS, OpenAI chat.
   - `GOOGLE_CLOUD_PROJECT` – Google Cloud project ID (or `GOOGLE_PROJECT`)
   - **Twilio (Phase 3):** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VOICE_WEBHOOK_URL` (public base URL, e.g. `https://xxx.ngrok.io`), `TWILIO_AI=openai`, `TWILIO_LANGUAGE=ja`
   - **STT (optional):** `STT_PROVIDER=google` (default) or `STT_PROVIDER=whisper` – Whisper (OpenAI) often improves accuracy for Japanese; uses `OPENAI_API_KEY`
+  - **STT streaming (optional):** `STT_STREAMING=true` (default) or `false` – when true, web chat uses streaming STT (WebSocket + PCM) for lower latency; when false, uses batch upload (WebM blob).
   - **Voice prompt (optional):** `VOICE_VERBOSITY=brief|normal|detailed` (default: `normal`) – controls how verbose the LLM is for voice (web and Twilio). Affects only the chat model’s system prompt; does not change TTS, playback, or other voice behavior. `VOICE_PROMPT_TEMPLATE` – optional full system prompt; use placeholders `{language_instruction}` and `{verbosity_instruction}`.
   - **Web search (optional):** `TAVILY_API_KEY` – when set, the agent can use the web_search tool (Tavily) to look up current information; used for both text and voice chat.
 

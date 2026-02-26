@@ -78,8 +78,16 @@ export async function chat(
   return data
 }
 
-export async function health(): Promise<{ ok: boolean; stt_available: boolean; tts_available: boolean }> {
-  const { data } = await api.get('/health')
+export interface HealthResponse {
+  ok: boolean
+  stt_available: boolean
+  tts_available: boolean
+  /** When true, use streaming STT (WebSocket + PCM). Default true. */
+  stt_streaming?: boolean
+}
+
+export async function health(): Promise<HealthResponse> {
+  const { data } = await api.get<HealthResponse>('/health')
   return data
 }
 
@@ -87,6 +95,72 @@ export async function health(): Promise<{ ok: boolean; stt_available: boolean; t
 export async function endVoiceSession(): Promise<{ ok: boolean }> {
   const { data } = await api.post<{ ok: boolean }>('/voice/end')
   return data
+}
+
+/** Build WebSocket URL for streaming transcribe (same origin, /api/transcribe/stream). */
+function transcribeStreamWsUrl(): string {
+  const base = window.location.origin
+  const wsScheme = base.startsWith('https') ? 'wss:' : 'ws:'
+  const host = base.replace(/^https?:\/\//, '')
+  return `${wsScheme}//${host}/api/transcribe/stream`
+}
+
+export interface StreamingTranscribeSession {
+  sendChunk(pcmInt16: ArrayBuffer): void
+  end(): Promise<string>
+}
+
+/**
+ * Start a streaming STT session. Send config, then PCM chunks (Int16 LE, 16kHz mono), then call end() to get final transcript.
+ */
+export function startStreamingTranscribe(
+  languageCode: string,
+  sampleRate: number = 16000
+): StreamingTranscribeSession {
+  const ws = new WebSocket(transcribeStreamWsUrl())
+  const finalParts: string[] = []
+  let resolveEnd!: (value: string) => void
+  let resolved = false
+  const endPromise = new Promise<string>((resolve) => {
+    resolveEnd = (v: string) => {
+      if (!resolved) {
+        resolved = true
+        resolve(v)
+      }
+    }
+  })
+
+  ws.binaryType = 'arraybuffer'
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ language_code: languageCode, sample_rate: sampleRate }))
+  }
+
+  ws.onmessage = (event) => {
+    if (typeof event.data !== 'string') return
+    try {
+      const msg = JSON.parse(event.data)
+      if (msg.type === 'final' && msg.text) finalParts.push(msg.text)
+      if (msg.type === 'done') resolveEnd(finalParts.join(' ').trim())
+      if (msg.type === 'error') resolveEnd('')
+    } catch {
+      // ignore
+    }
+  }
+
+  ws.onerror = () => resolveEnd('')
+  ws.onclose = () => {
+    if (!resolved) resolveEnd(finalParts.join(' ').trim())
+  }
+
+  return {
+    sendChunk(pcmInt16: ArrayBuffer) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(pcmInt16)
+    },
+    end(): Promise<string> {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ end: true }))
+      return endPromise
+    },
+  }
 }
 
 // Voice calls (Twilio) - list and detail with transcript + latency

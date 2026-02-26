@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSettings } from '../state/settings'
 import { useChat } from '../state/chat'
-import { transcribe, textToSpeech, chat, endVoiceSession, type ChatMessage } from '../api/client'
+import {
+  transcribe,
+  textToSpeech,
+  chat,
+  endVoiceSession,
+  health,
+  startStreamingTranscribe,
+  type ChatMessage,
+} from '../api/client'
 import { stripMarkdownForTTS } from '../utils/stripMarkdown'
+
+const STREAMING_PCM_RATE = 16000
+/** Downsample factor: 48000 -> 16000 = 3, 44100 -> ~16000 = 2.76 -> use 3 */
+const DOWNSAMPLE_FACTOR = 3
 
 // Voice activity: only auto-send after user has spoken, then paused (silence).
 const SILENCE_RMS_THRESHOLD = 0.015   // below this = silence (time-domain RMS 0–1)
@@ -34,6 +46,10 @@ export function useVoiceConversation() {
   const userRequestedStopRef = useRef(false)
   const messagesRef = useRef<ChatMessage[]>([])
   const currentTTSRef = useRef<{ audio: HTMLAudioElement; url: string } | null>(null)
+  const sttStreamingRef = useRef<boolean | null>(null)
+  const streamingSessionRef = useRef<ReturnType<typeof startStreamingTranscribe> | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null)
 
   const languageCode = language === 'JA' ? 'ja-JP' : 'en-US'
   const asrModel = voiceModel
@@ -77,21 +93,50 @@ export function useVoiceConversation() {
   const restartRecording = useCallback(() => {
     const stream = streamRef.current
     if (!stream) return
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm'
-    const recorder = new MediaRecorder(stream, { mimeType })
-    chunksRef.current = []
+    const useStreaming = sttStreamingRef.current && asrModel === 'google'
+    if (useStreaming) {
+      const ac = audioContextRef.current ?? new AudioContext()
+      audioContextRef.current = ac
+      const session = startStreamingTranscribe(languageCode, STREAMING_PCM_RATE)
+      streamingSessionRef.current = session
+      const source = ac.createMediaStreamSource(stream)
+      const bufferSize = 4096
+      const processor = ac.createScriptProcessor(bufferSize, 1, 1)
+      scriptProcessorRef.current = processor
+      processor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0)
+        const downsampledLength = Math.floor(input.length / DOWNSAMPLE_FACTOR)
+        const pcm = new Int16Array(downsampledLength)
+        for (let i = 0; i < downsampledLength; i++) {
+          const s = input[i * DOWNSAMPLE_FACTOR]
+          const v = s < 0 ? s * 0x8000 : s * 0x7fff
+          pcm[i] = Math.max(-0x8000, Math.min(0x7fff, Math.floor(v)))
+        }
+        streamingSessionRef.current?.sendChunk(pcm.buffer)
+      }
+      source.connect(processor)
+      const silentGain = ac.createGain()
+      silentGain.gain.value = 0
+      processor.connect(silentGain)
+      silentGain.connect(ac.destination)
+      recorderRef.current = null
+    } else {
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm'
+      const recorder = new MediaRecorder(stream, { mimeType })
+      chunksRef.current = []
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
+      recorder.start(200)
+      recorderRef.current = recorder
+    }
     recordingStartRef.current = Date.now()
     silenceStartRef.current = null
     hasSpokenRef.current = false
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data)
-    }
-    recorder.start(200)
-    recorderRef.current = recorder
     animationRef.current = requestAnimationFrame(checkVolume)
-  }, [checkVolume])
+  }, [checkVolume, languageCode, asrModel])
 
   const stopRecordingAndSend = useCallback(async () => {
     const recorder = recorderRef.current
@@ -122,13 +167,35 @@ export function useVoiceConversation() {
       return
     }
 
-    if (!recorder || recorder.state !== 'recording') return
-    recorder.stop()
-    if (!continuous && stream) {
-      stream.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
+    const useStreaming = streamingSessionRef.current != null
+    const streamingSession = useStreaming ? streamingSessionRef.current : null
+    if (useStreaming) {
+      streamingSessionRef.current = null
+      if (scriptProcessorRef.current) {
+        try {
+          scriptProcessorRef.current.disconnect()
+        } catch {
+          // ignore
+        }
+        scriptProcessorRef.current = null
+      }
+      audioContextRef.current = null
+      const durationMs = recordingStartRef.current ? Date.now() - recordingStartRef.current : 0
+      if (durationMs < MIN_RECORDING_MS) {
+        if (continuous && streamRef.current && !userRequestedStopRef.current) restartRecording()
+        return
+      }
+    } else {
+      if (!recorder || recorder.state !== 'recording') return
+      recorder.stop()
     }
-    if (!continuous) setIsListening(false)
+    if (!continuous && stream) {
+      if (!useStreaming) {
+        stream.getTracks().forEach((t) => t.stop())
+        streamRef.current = null
+      }
+      if (!useStreaming) setIsListening(false)
+    }
     if (animationRef.current != null) {
       cancelAnimationFrame(animationRef.current)
       animationRef.current = null
@@ -140,26 +207,38 @@ export function useVoiceConversation() {
     const doRestart = () => {
       if (continuous && streamRef.current && !userRequestedStopRef.current) restartRecording()
     }
-    if (chunks.length === 0) {
-      doRestart()
-      return
+    if (!useStreaming) {
+      if (chunks.length === 0) {
+        doRestart()
+        return
+      }
+      const durationMs = recordingStartRef.current ? Date.now() - recordingStartRef.current : 0
+      if (durationMs < MIN_RECORDING_MS) {
+        doRestart()
+        return
+      }
     }
-    const blob = new Blob(chunks, { type: 'audio/webm' })
-    const duration = recordingStartRef.current
-      ? Date.now() - recordingStartRef.current
-      : 0
-    if (duration < MIN_RECORDING_MS) {
-      doRestart()
-      return
+    if (stream && !continuous) {
+      stream.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
     }
+    if (!continuous) setIsListening(false)
     setIsProcessing(true)
     setError(null)
     let endConversation = false
     try {
       const tStt0 = performance.now()
-      const result = await transcribe(blob, language, asrModel)
+      let userText: string
+      if (useStreaming && streamingSession) {
+        userText = (await streamingSession.end()).trim()
+      } else if (!useStreaming) {
+        const blob = new Blob(chunks, { type: 'audio/webm' })
+        const result = await transcribe(blob, language, asrModel)
+        userText = result.text?.trim()
+      } else {
+        userText = ''
+      }
       const stt_ms = Math.round(performance.now() - tStt0)
-      const userText = result.text?.trim()
       if (!userText) {
         setIsProcessing(false)
         if (continuous) doRestart()
@@ -253,6 +332,16 @@ export function useVoiceConversation() {
       return
     }
     try {
+      if (sttStreamingRef.current === null) {
+        const h = await health()
+        sttStreamingRef.current = h.stt_streaming !== false
+      }
+      const useStreaming = sttStreamingRef.current && asrModel === 'google'
+      if (useStreaming) {
+        console.log('[Voice] Using STT streaming (WebSocket /api/transcribe/stream)')
+      } else {
+        console.log('[Voice] Using STT batch (POST /api/transcribe). stt_streaming=', sttStreamingRef.current, 'asrModel=', asrModel)
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
       const ac = new AudioContext()
@@ -261,16 +350,42 @@ export function useVoiceConversation() {
       analyser.fftSize = 256
       source.connect(analyser)
       analyserRef.current = analyser
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm'
-      const recorder = new MediaRecorder(stream, { mimeType })
-      chunksRef.current = []
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data)
+      if (useStreaming) {
+        audioContextRef.current = ac
+        const session = startStreamingTranscribe(languageCode, STREAMING_PCM_RATE)
+        streamingSessionRef.current = session
+        const bufferSize = 4096
+        const processor = ac.createScriptProcessor(bufferSize, 1, 1)
+        scriptProcessorRef.current = processor
+        processor.onaudioprocess = (e) => {
+          const input = e.inputBuffer.getChannelData(0)
+          const downsampledLength = Math.floor(input.length / DOWNSAMPLE_FACTOR)
+          const pcm = new Int16Array(downsampledLength)
+          for (let i = 0; i < downsampledLength; i++) {
+            const s = input[i * DOWNSAMPLE_FACTOR]
+            const v = s < 0 ? s * 0x8000 : s * 0x7fff
+            pcm[i] = Math.max(-0x8000, Math.min(0x7fff, Math.floor(v)))
+          }
+          streamingSessionRef.current?.sendChunk(pcm.buffer)
+        }
+        source.connect(processor)
+        const silentGain = ac.createGain()
+        silentGain.gain.value = 0
+        processor.connect(silentGain)
+        silentGain.connect(ac.destination)
+        recorderRef.current = null
+      } else {
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : 'audio/webm'
+        const recorder = new MediaRecorder(stream, { mimeType })
+        chunksRef.current = []
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunksRef.current.push(e.data)
+        }
+        recorder.start(200)
+        recorderRef.current = recorder
       }
-      recorder.start(200)
-      recorderRef.current = recorder
       recordingStartRef.current = Date.now()
       silenceStartRef.current = null
       hasSpokenRef.current = false
@@ -280,7 +395,7 @@ export function useVoiceConversation() {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg)
     }
-  }, [checkVolume])
+  }, [checkVolume, languageCode, asrModel])
 
   const stopListening = useCallback(() => {
     userRequestedStopRef.current = true
