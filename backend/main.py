@@ -478,7 +478,7 @@ async def chat(req: ChatRequest):
         query = (last.content or "").strip()
         history_list = [{"role": (m.role or "user"), "content": (m.content or "")} for m in req.messages[:-1]]
         passthru_url = (os.getenv("CHAT_PASSTHRU_URL") or "http://localhost:8000/chat").strip()
-        body = {"query": query + "５０文字以内に答えてください。", "history": history_list, "source": "voice"}
+        body = {"query": query, "history": history_list, "source": "voice"}
 
         def _do_passthru() -> dict:
             import urllib.request

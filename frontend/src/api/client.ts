@@ -112,6 +112,7 @@ export interface StreamingTranscribeSession {
 
 /**
  * Start a streaming STT session. Send config, then PCM chunks (Int16 LE, 16kHz mono), then call end() to get final transcript.
+ * Chunks sent before the WebSocket opens are buffered and flushed on open to avoid dropping early audio (prevents Google 409 timeout).
  */
 export function startStreamingTranscribe(
   languageCode: string,
@@ -119,6 +120,7 @@ export function startStreamingTranscribe(
 ): StreamingTranscribeSession {
   const ws = new WebSocket(transcribeStreamWsUrl())
   const finalParts: string[] = []
+  const chunkBuffer: ArrayBuffer[] = []
   let resolveEnd!: (value: string) => void
   let resolved = false
   const endPromise = new Promise<string>((resolve) => {
@@ -133,6 +135,8 @@ export function startStreamingTranscribe(
   ws.binaryType = 'arraybuffer'
   ws.onopen = () => {
     ws.send(JSON.stringify({ language_code: languageCode, sample_rate: sampleRate }))
+    for (const buf of chunkBuffer) ws.send(buf)
+    chunkBuffer.length = 0
   }
 
   ws.onmessage = (event) => {
@@ -154,7 +158,11 @@ export function startStreamingTranscribe(
 
   return {
     sendChunk(pcmInt16: ArrayBuffer) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(pcmInt16)
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(pcmInt16)
+      } else {
+        chunkBuffer.push(pcmInt16)
+      }
     },
     end(): Promise<string> {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ end: true }))
