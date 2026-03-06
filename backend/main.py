@@ -244,9 +244,17 @@ async def transcribe_stream_ws(websocket: WebSocket):
     chunk_queue = queue.Queue()
     result_queue = queue.Queue()
 
+    # Keepalive: if no client chunk for this long, yield silence so Google doesn't 409 timeout
+    STREAM_KEEPALIVE_TIMEOUT = 0.2
+    SILENCE_CHUNK_10MS = b"\x00" * 320  # 10ms at 16kHz 16-bit mono
+
     def chunk_iterator():
         while True:
-            item = chunk_queue.get()
+            try:
+                item = chunk_queue.get(timeout=STREAM_KEEPALIVE_TIMEOUT)
+            except queue.Empty:
+                yield SILENCE_CHUNK_10MS
+                continue
             if item is None:
                 return
             yield item
