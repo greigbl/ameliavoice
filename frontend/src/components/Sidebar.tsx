@@ -9,7 +9,7 @@ import Select from '@mui/material/Select'
 import Typography from '@mui/material/Typography'
 import Link from '@mui/material/Link'
 import { Link as RouterLink, useLocation } from 'react-router-dom'
-import { useSettings, type Integration, type LanguageOption, type VoiceModelOption, type VerbosityOption } from '../state/settings'
+import { useSettings, type ClientIdOption, type Integration, type LanguageOption, type VoiceModelOption, type VerbosityOption } from '../state/settings'
 
 const SIDEBAR_WIDTH = 260
 
@@ -22,12 +22,14 @@ export function Sidebar() {
     language,
     voiceModel,
     verbosity,
+    clientId,
     continuousVoiceMode,
     setDomain,
     setIntegration,
     setLanguage,
     setVoiceModel,
     setVerbosity,
+    setClientId,
     setContinuousVoiceMode,
   } = useSettings()
 
@@ -132,6 +134,23 @@ export function Sidebar() {
           <MenuItem value="brief">{t('verbosityBrief')}</MenuItem>
           <MenuItem value="normal">{t('verbosityNormal')}</MenuItem>
           <MenuItem value="detailed">{t('verbosityDetailed')}</MenuItem>
+        </Select>
+      </FormControl>
+
+      <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600 }}>
+        Client ID
+      </Typography>
+      <FormControl size="small" fullWidth>
+        <InputLabel id="client-id-label">Client ID</InputLabel>
+        <Select
+          labelId="client-id-label"
+          label="Client ID"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value as ClientIdOption)}
+        >
+          <MenuItem value="isuzu">isuzu</MenuItem>
+          <MenuItem value="monterey">monterey</MenuItem>
+          <MenuItem value="maejima">maejima</MenuItem>
         </Select>
       </FormControl>
 

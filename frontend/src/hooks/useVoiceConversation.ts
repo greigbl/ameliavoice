@@ -28,7 +28,7 @@ export function useVoiceConversation() {
   const [isListening, setIsListening] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { language, integration, voiceModel, verbosity, continuousVoiceMode } = useSettings()
+  const { language, integration, voiceModel, verbosity, continuousVoiceMode, clientId } = useSettings()
   const { messages, addMessage } = useChat()
 
   useEffect(() => {
@@ -253,7 +253,7 @@ export function useVoiceConversation() {
       const tLlm0 = performance.now()
       //Put a call to Fred's backend here.
       
-      const chatRes = await chat(newMessages, integration, language, verbosity)
+      const chatRes = await chat(newMessages, integration, language, verbosity, clientId)
       //BUt still need to handle object differences; request in / response out.
       
       const llm_ms = Math.round(performance.now() - tLlm0)
@@ -308,6 +308,7 @@ export function useVoiceConversation() {
     integration,
     language,
     verbosity,
+    clientId,
     languageCode,
     asrModel,
     addMessage,

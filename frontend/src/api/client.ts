@@ -61,19 +61,22 @@ export async function chat(
   messages: ChatMessage[],
   integration: string,
   language: string = 'en',
-  verbosity?: 'brief' | 'normal' | 'detailed'
+  verbosity?: 'brief' | 'normal' | 'detailed',
+  clientId?: string
 ): Promise<ChatResponse> {
   const body: {
     messages: { role: string; content: string }[]
     integration: string
     language: string
     verbosity?: string
+    client_id?: string
   } = {
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
     integration,
     language: language === 'JA' ? 'ja' : 'en',
   }
   if (verbosity != null) body.verbosity = verbosity
+  if (clientId != null) body.client_id = clientId
   const { data } = await api.post<ChatResponse>('/chat', body)
   return data
 }

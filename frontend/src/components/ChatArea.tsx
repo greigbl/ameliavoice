@@ -18,7 +18,7 @@ import { useSettings } from '../state/settings'
 export function ChatArea() {
   const { t } = useTranslation()
   const { messages, addMessage } = useChat()
-  const { integration, language, verbosity } = useSettings()
+  const { integration, language, verbosity, clientId } = useSettings()
   const {
     isListening,
     isProcessing,
@@ -44,7 +44,7 @@ export function ChatArea() {
       { role: 'user', content: text },
     ]
     try {
-      const res = await chat(newMessages, integration, language, verbosity)
+      const res = await chat(newMessages, integration, language, verbosity, clientId)
       addMessage({ role: 'assistant', content: res.message.content })
     } catch (e) {
       addMessage({

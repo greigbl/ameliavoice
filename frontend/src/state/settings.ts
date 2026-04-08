@@ -6,6 +6,7 @@ export type Integration = 'openai' | 'amelia'
 export type LanguageOption = 'EN' | 'JA'
 export type VoiceModelOption = 'google' | 'whisper'
 export type VerbosityOption = 'brief' | 'normal' | 'detailed'
+export type ClientIdOption = 'isuzu' | 'monterey' | 'maejima'
 
 interface SettingsState {
   domain: string
@@ -13,12 +14,14 @@ interface SettingsState {
   language: LanguageOption
   voiceModel: VoiceModelOption
   verbosity: VerbosityOption
+  clientId: ClientIdOption
   continuousVoiceMode: boolean
   setDomain: (v: string) => void
   setIntegration: (v: Integration) => void
   setLanguage: (v: LanguageOption) => void
   setVoiceModel: (v: VoiceModelOption) => void
   setVerbosity: (v: VerbosityOption) => void
+  setClientId: (v: ClientIdOption) => void
   setContinuousVoiceMode: (v: boolean) => void
 }
 
@@ -32,6 +35,7 @@ export const useSettings = create<SettingsState>()(
       language: 'EN',
       voiceModel: 'google',
       verbosity: 'normal',
+      clientId: 'isuzu',
       continuousVoiceMode: true,
       setDomain: (v) => set({ domain: v }),
       setIntegration: (v) => set({ integration: v }),
@@ -41,6 +45,7 @@ export const useSettings = create<SettingsState>()(
       },
       setVoiceModel: (v) => set({ voiceModel: v }),
       setVerbosity: (v) => set({ verbosity: v }),
+      setClientId: (v) => set({ clientId: v }),
       setContinuousVoiceMode: (v) => set({ continuousVoiceMode: v }),
     }),
     {
@@ -51,6 +56,7 @@ export const useSettings = create<SettingsState>()(
         language: state.language,
         voiceModel: state.voiceModel,
         verbosity: state.verbosity,
+        clientId: state.clientId,
         continuousVoiceMode: state.continuousVoiceMode,
       }),
       onRehydrateStorage: () => (state, err) => {

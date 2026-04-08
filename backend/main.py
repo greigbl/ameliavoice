@@ -92,6 +92,7 @@ class ChatRequest(BaseModel):
     integration: str = "openai"  # "openai" | "amelia" (amelia stub for Phase 2)
     language: str = "en"  # "ja" | "en" for localized tool fallbacks (e.g. end_conversation default message)
     verbosity: str | None = None  # "brief" | "normal" | "detailed"; overrides VOICE_VERBOSITY when set (e.g. from web app)
+    client_id: str | None = None  # passthru tenant selection from UI (e.g. isuzu, monterey, maejima)
 
 
 class ChatResponse(BaseModel):
@@ -486,7 +487,7 @@ async def chat(req: ChatRequest):
         query = (last.content or "").strip()
         history_list = [{"role": (m.role or "user"), "content": (m.content or "")} for m in req.messages[:-1]]
         passthru_url = (os.getenv("CHAT_PASSTHRU_URL") or "http://localhost:8000/chat").strip()
-        body = {"query": query, "history": history_list, "source": "voice"}
+        body = {"query": query, "history": history_list, "source": "voice", "client_id": req.client_id}
 
         def _do_passthru() -> dict:
             import urllib.request
