@@ -5,8 +5,8 @@ import ja from './locales/ja.json'
 
 i18n.use(initReactI18next).init({
   resources: { en: { translation: en }, ja: { translation: ja } },
-  lng: 'en',
-  fallbackLng: 'en',
+  lng: 'ja',
+  fallbackLng: 'ja',
   interpolation: { escapeValue: false },
 })
 

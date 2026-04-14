@@ -32,7 +32,7 @@ export const useSettings = create<SettingsState>()(
     (set) => ({
       domain: '',
       integration: 'openai',
-      language: 'EN',
+      language: 'JA',
       voiceModel: 'google',
       verbosity: 'normal',
       clientId: 'isuzu',
