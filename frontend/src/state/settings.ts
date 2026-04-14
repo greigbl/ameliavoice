@@ -11,7 +11,10 @@ export type ClientIdOption = 'isuzu' | 'monterey' | 'maejima'
 interface SettingsState {
   domain: string
   integration: Integration
+  /** UI strings + chat/LLM language. */
   language: LanguageOption
+  /** STT + TTS locale (spoken language). Defaults Japanese. */
+  voiceLanguage: LanguageOption
   voiceModel: VoiceModelOption
   verbosity: VerbosityOption
   clientId: ClientIdOption
@@ -19,6 +22,7 @@ interface SettingsState {
   setDomain: (v: string) => void
   setIntegration: (v: Integration) => void
   setLanguage: (v: LanguageOption) => void
+  setVoiceLanguage: (v: LanguageOption) => void
   setVoiceModel: (v: VoiceModelOption) => void
   setVerbosity: (v: VerbosityOption) => void
   setClientId: (v: ClientIdOption) => void
@@ -33,6 +37,7 @@ export const useSettings = create<SettingsState>()(
       domain: '',
       integration: 'openai',
       language: 'JA',
+      voiceLanguage: 'JA',
       voiceModel: 'google',
       verbosity: 'normal',
       clientId: 'isuzu',
@@ -43,6 +48,7 @@ export const useSettings = create<SettingsState>()(
         set({ language: v })
         i18n.changeLanguage(v === 'JA' ? 'ja' : 'en')
       },
+      setVoiceLanguage: (v) => set({ voiceLanguage: v }),
       setVoiceModel: (v) => set({ voiceModel: v }),
       setVerbosity: (v) => set({ verbosity: v }),
       setClientId: (v) => set({ clientId: v }),
@@ -54,11 +60,20 @@ export const useSettings = create<SettingsState>()(
         domain: state.domain,
         integration: state.integration,
         language: state.language,
+        voiceLanguage: state.voiceLanguage,
         voiceModel: state.voiceModel,
         verbosity: state.verbosity,
         clientId: state.clientId,
         continuousVoiceMode: state.continuousVoiceMode,
       }),
+      merge: (persisted, current) => {
+        const p = persisted as Partial<SettingsState>
+        return {
+          ...current,
+          ...p,
+          voiceLanguage: p.voiceLanguage ?? current.voiceLanguage,
+        }
+      },
       onRehydrateStorage: () => (state, err) => {
         if (!err && state?.language) {
           i18n.changeLanguage(state.language === 'JA' ? 'ja' : 'en')

@@ -26,6 +26,7 @@ export function Sidebar({ sessionClientLocked = false, onLogout }: SidebarProps)
     domain,
     integration,
     language,
+    voiceLanguage,
     voiceModel,
     verbosity,
     clientId,
@@ -33,6 +34,7 @@ export function Sidebar({ sessionClientLocked = false, onLogout }: SidebarProps)
     setDomain,
     setIntegration,
     setLanguage,
+    setVoiceLanguage,
     setVoiceModel,
     setVerbosity,
     setClientId,
@@ -97,6 +99,9 @@ export function Sidebar({ sessionClientLocked = false, onLogout }: SidebarProps)
       <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600 }}>
         {t('language')}
       </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+        {t('languageHint')}
+      </Typography>
       <FormControl size="small" fullWidth>
         <InputLabel id="language-label">{t('language')}</InputLabel>
         <Select
@@ -104,6 +109,25 @@ export function Sidebar({ sessionClientLocked = false, onLogout }: SidebarProps)
           label={t('language')}
           value={language}
           onChange={(e) => setLanguage(e.target.value as LanguageOption)}
+        >
+          <MenuItem value="EN">{t('languageEN')}</MenuItem>
+          <MenuItem value="JA">{t('languageJA')}</MenuItem>
+        </Select>
+      </FormControl>
+
+      <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600, mt: 0.5 }}>
+        {t('voiceLanguage')}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+        {t('voiceLanguageHint')}
+      </Typography>
+      <FormControl size="small" fullWidth>
+        <InputLabel id="voice-language-label">{t('voiceLanguage')}</InputLabel>
+        <Select
+          labelId="voice-language-label"
+          label={t('voiceLanguage')}
+          value={voiceLanguage}
+          onChange={(e) => setVoiceLanguage(e.target.value as LanguageOption)}
         >
           <MenuItem value="EN">{t('languageEN')}</MenuItem>
           <MenuItem value="JA">{t('languageJA')}</MenuItem>

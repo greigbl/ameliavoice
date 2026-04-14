@@ -28,7 +28,8 @@ export function useVoiceConversation() {
   const [isListening, setIsListening] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { language, integration, voiceModel, verbosity, continuousVoiceMode, clientId } = useSettings()
+  const { language, voiceLanguage, integration, voiceModel, verbosity, continuousVoiceMode, clientId } =
+    useSettings()
   const { messages, addMessage } = useChat()
 
   useEffect(() => {
@@ -51,7 +52,7 @@ export function useVoiceConversation() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null)
 
-  const languageCode = language === 'JA' ? 'ja-JP' : 'en-US'
+  const languageCode = voiceLanguage === 'JA' ? 'ja-JP' : 'en-US'
   const asrModel = voiceModel
 
   const checkVolume = useCallback(() => {
@@ -233,7 +234,7 @@ export function useVoiceConversation() {
         userText = (await streamingSession.end()).trim()
       } else if (!useStreaming) {
         const blob = new Blob(chunks, { type: 'audio/webm' })
-        const result = await transcribe(blob, language, asrModel)
+        const result = await transcribe(blob, voiceLanguage, asrModel)
         userText = result.text?.trim()
       } else {
         userText = ''
