@@ -6,6 +6,11 @@ import IconButton from '@mui/material/IconButton'
 import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
 import Alert from '@mui/material/Alert'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import MicIcon from '@mui/icons-material/Mic'
 import MicOffIcon from '@mui/icons-material/MicOff'
 import SendIcon from '@mui/icons-material/Send'
@@ -17,7 +22,7 @@ import { useSettings } from '../state/settings'
 
 export function ChatArea() {
   const { t } = useTranslation()
-  const { messages, addMessage } = useChat()
+  const { messages, addMessage, clearMessages } = useChat()
   const { integration, language, verbosity, clientId } = useSettings()
   const {
     isListening,
@@ -27,6 +32,7 @@ export function ChatArea() {
     clearError,
   } = useVoiceConversation()
   const [input, setInput] = useState('')
+  const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -65,9 +71,30 @@ export function ChatArea() {
     >
       <Box
         sx={{
+          px: 2,
+          pt: 1.5,
+          pb: 0,
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <Button
+          size="small"
+          color="inherit"
+          disabled={messages.length === 0 || isListening || isProcessing}
+          onClick={() => setClearDialogOpen(true)}
+        >
+          {t('clearHistory')}
+        </Button>
+      </Box>
+      <Box
+        sx={{
           flex: 1,
           overflow: 'auto',
           p: 2,
+          pt: 1,
           display: 'flex',
           flexDirection: 'column',
           gap: 2,
@@ -189,6 +216,26 @@ export function ChatArea() {
           <SendIcon />
         </IconButton>
       </Paper>
+
+      <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{t('clearHistoryTitle')}</DialogTitle>
+        <DialogContent>
+          <DialogContentText>{t('clearHistoryBody', { clientId })}</DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setClearDialogOpen(false)}>{t('cancel')}</Button>
+          <Button
+            color="warning"
+            variant="contained"
+            onClick={() => {
+              clearMessages()
+              setClearDialogOpen(false)
+            }}
+          >
+            {t('clearHistoryConfirm')}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

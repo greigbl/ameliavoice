@@ -1,0 +1,19 @@
+{
+  "users": [
+    {
+      "username": "REPLACE_USERNAME",
+      "password": "REPLACE_PASSWORD",
+      "client_id": "isuzu"
+    },
+    {
+      "username": "REPLACE_USERNAME_2",
+      "password": "REPLACE_PASSWORD_2",
+      "client_id": "monterey"
+    },
+    {
+      "username": "REPLACE_USERNAME_3",
+      "password": "REPLACE_PASSWORD_3",
+      "client_id": "maejima"
+    }
+  ]
+}

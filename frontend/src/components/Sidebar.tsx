@@ -8,12 +8,18 @@ import MenuItem from '@mui/material/MenuItem'
 import Select from '@mui/material/Select'
 import Typography from '@mui/material/Typography'
 import Link from '@mui/material/Link'
+import Button from '@mui/material/Button'
 import { Link as RouterLink, useLocation } from 'react-router-dom'
 import { useSettings, type ClientIdOption, type Integration, type LanguageOption, type VoiceModelOption, type VerbosityOption } from '../state/settings'
 
 const SIDEBAR_WIDTH = 260
 
-export function Sidebar() {
+type SidebarProps = {
+  sessionClientLocked?: boolean
+  onLogout?: () => Promise<void>
+}
+
+export function Sidebar({ sessionClientLocked = false, onLogout }: SidebarProps) {
   const { t } = useTranslation()
   const location = useLocation()
   const {
@@ -147,6 +153,7 @@ export function Sidebar() {
           label="Client ID"
           value={clientId}
           onChange={(e) => setClientId(e.target.value as ClientIdOption)}
+          disabled={sessionClientLocked}
         >
           <MenuItem value="isuzu">isuzu</MenuItem>
           <MenuItem value="monterey">monterey</MenuItem>
@@ -168,6 +175,12 @@ export function Sidebar() {
         label={t('continuousVoiceMode')}
         sx={{ mt: 0.5 }}
       />
+
+      {onLogout && sessionClientLocked && (
+        <Button variant="outlined" color="inherit" size="small" sx={{ mt: 'auto' }} onClick={() => void onLogout()}>
+          Log out
+        </Button>
+      )}
     </Box>
   )
 }

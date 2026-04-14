@@ -9,6 +9,7 @@ import queue
 import tempfile
 import threading
 import time
+import urllib.error
 from urllib.parse import urlparse, urlunparse
 
 try:
@@ -22,10 +23,11 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend import auth
 from backend.google_stt_service import GoogleSTTService
 from backend.whisper_stt_service import WhisperSTTService
 from backend.tts_service import TTSService
@@ -47,6 +49,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def enforce_api_auth(request: Request, call_next):
+    """When AUTH_JWT_SECRET is set, require a valid JWT cookie for /api/* except auth login/logout/me."""
+    if not auth.auth_enabled():
+        return await call_next(request)
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return await call_next(request)
+    method = request.method.upper()
+    if method == "POST" and path in ("/api/auth/login", "/api/auth/logout"):
+        return await call_next(request)
+    if method == "GET" and path == "/api/auth/me":
+        return await call_next(request)
+    payload = auth.payload_from_request(request)
+    if not payload:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    request.state.auth = payload
+    return await call_next(request)
+
 
 # Path to built frontend (so we can serve it from backend when behind a proxy)
 _FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
@@ -124,6 +147,11 @@ class TTSRequest(BaseModel):
     language_code: str = "ja-JP"
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
 # --- Routes ---
 
 
@@ -148,6 +176,64 @@ def _stt_streaming_enabled() -> bool:
     """True if STT_STREAMING env is true (default True)."""
     v = (os.getenv("STT_STREAMING") or "true").strip().lower()
     return v in ("1", "true", "yes")
+
+
+def _hide_sidebar() -> bool:
+    """True if HIDE_SIDEBAR is set (web UI should not show the settings sidebar)."""
+    v = (os.getenv("HIDE_SIDEBAR") or "").strip().lower()
+    return v in ("1", "true", "yes")
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: LoginRequest):
+    """Validate username/password against AUTH_USERS_FILE; set HttpOnly JWT cookie."""
+    if not auth.auth_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication is not configured (set AUTH_JWT_SECRET)",
+        )
+    user_table = auth.load_user_table()
+    if not user_table:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No user accounts file loaded. Copy auth_users.example.json to auth_users.json "
+                "at the project root, or set AUTH_USERS_FILE to your JSON path."
+            ),
+        )
+    client_id = auth.match_credentials(body.username, body.password, user_table)
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = auth.create_token(body.username.strip(), client_id)
+    r = JSONResponse(
+        {"ok": True, "username": body.username.strip(), "client_id": client_id},
+    )
+    auth.attach_auth_cookie(r, token)
+    return r
+
+
+@app.post("/api/auth/logout")
+async def auth_logout():
+    r = JSONResponse({"ok": True})
+    auth.clear_auth_cookie(r)
+    return r
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    """Current session from cookie; does not require auth (returns authenticated: false when logged out)."""
+    hs = _hide_sidebar()
+    if not auth.auth_enabled():
+        return {"authenticated": False, "auth_disabled": True, "hide_sidebar": hs}
+    payload = auth.payload_from_request(request)
+    if not payload:
+        return {"authenticated": False, "hide_sidebar": hs}
+    return {
+        "authenticated": True,
+        "username": payload.get("sub"),
+        "client_id": payload.get("client_id"),
+        "hide_sidebar": hs,
+    }
 
 
 @app.get("/api/health")
@@ -218,6 +304,9 @@ async def transcribe_stream_ws(websocket: WebSocket):
     then {"end": true}. Server sends {"type": "interim"|"final", "text": "...", "confidence": ...}, then {"type": "done"}.
     Only available when STT_STREAMING is true and Google STT is available.
     """
+    if auth.auth_enabled() and not auth.payload_from_websocket(websocket):
+        await websocket.close(code=4001, reason="Not authenticated")
+        return
     await websocket.accept()
     logger.info("STT streaming WebSocket connected")
     if not _stt_streaming_enabled():
@@ -455,7 +544,7 @@ def _chat_backend() -> str:
 
 
 @app.post("/api/chat")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, request: Request):
     """
     Chat endpoint. Backend is selected by env CHAT_BACKEND:
     - greig: OpenAI chat with end_conversation and web_search tools. Returns { message, done, end_conversation }.
@@ -478,6 +567,13 @@ async def chat(req: ChatRequest):
             content=result,
             headers={"X-Process-Time": f"{elapsed:.3f}"},
         )
+    # When authenticated, JWT claim client_id is authoritative (matches login username → tenant).
+    # Body client_id is only used if auth is off or for backwards compatibility.
+    auth_payload = getattr(request.state, "auth", None)
+    effective_client_id = (
+        (auth_payload.get("client_id") if auth_payload else None) or req.client_id
+    )
+
     if backend == "passthru":
         if not req.messages:
             raise HTTPException(status_code=400, detail="messages required")
@@ -486,8 +582,9 @@ async def chat(req: ChatRequest):
             raise HTTPException(status_code=400, detail="last message must be from user (query)")
         query = (last.content or "").strip()
         history_list = [{"role": (m.role or "user"), "content": (m.content or "")} for m in req.messages[:-1]]
-        passthru_url = (os.getenv("CHAT_PASSTHRU_URL") or "http://localhost:8000/chat").strip()
-        body = {"query": query, "history": history_list, "source": "voice", "client_id": req.client_id}
+        # Default matches test_server.py (port 8000, path /api/chat). Main app often runs on 8080 (task dev).
+        passthru_url = (os.getenv("CHAT_PASSTHRU_URL") or "http://127.0.0.1:8000/api/chat").strip()
+        body = {"query": query, "history": history_list, "source": "voice", "client_id": effective_client_id}
 
         def _do_passthru() -> dict:
             import urllib.request
@@ -521,6 +618,18 @@ async def chat(req: ChatRequest):
                 end_conversation=False,
             )
         except Exception as e:
+            if isinstance(e, urllib.error.URLError) and not isinstance(e, urllib.error.HTTPError):
+                logger.exception("Passthru chat upstream unreachable: %s", e)
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"Passthru upstream unreachable at {passthru_url!r}: {e.reason!s}. "
+                        "Start the service that receives chat POSTs, or fix CHAT_PASSTHRU_URL. "
+                        "Local mock: run `uv run python test_server.py` (listens on :8000) and keep "
+                        "CHAT_PASSTHRU_URL=http://127.0.0.1:8000/api/chat. "
+                        "Or set CHAT_BACKEND=greig and OPENAI_API_KEY to chat in-process."
+                    ),
+                ) from e
             remote_detail = getattr(e, "remote_detail", None)
             if remote_detail:
                 logger.exception("Passthru chat error (remote 422 detail): %s", remote_detail)
@@ -596,6 +705,9 @@ def get_voice_call(call_sid: str):
 @app.websocket("/api/voice/calls/live")
 async def voice_calls_live_ws(websocket: WebSocket):
     """WebSocket for real-time transcript updates. Send {"subscribe": "CA123"} first."""
+    if auth.auth_enabled() and not auth.payload_from_websocket(websocket):
+        await websocket.close(code=4001, reason="Not authenticated")
+        return
     await websocket.accept()
     try:
         data = await websocket.receive_json()

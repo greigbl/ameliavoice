@@ -27,6 +27,9 @@ speech2text-ja-e0aa6d1f9eb3.json
 .env.local
 .env.*.local
 
+# Local auth user map (never commit)
+auth_users.json
+
 # OS / IDE
 .DS_Store
 *.log

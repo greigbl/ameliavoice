@@ -26,5 +26,10 @@
   "error": "エラー",
   "notAvailablePhase2": "Amelia連携はPhase 2です。今はOpenAIをご利用ください。",
   "voiceMode": "音声モード",
-  "continuousVoiceMode": "連続音声モード"
+  "continuousVoiceMode": "連続音声モード",
+  "clearHistory": "履歴を消去",
+  "clearHistoryTitle": "会話履歴を消去しますか？",
+  "clearHistoryBody": "このクライアント（{{clientId}}）のメッセージをこのブラウザから削除します。元に戻せません。",
+  "clearHistoryConfirm": "消去",
+  "cancel": "キャンセル"
 }

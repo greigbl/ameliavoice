@@ -26,5 +26,10 @@
   "error": "Error",
   "notAvailablePhase2": "Amelia integration (Phase 2) – use OpenAI for now.",
   "voiceMode": "Voice mode",
-  "continuousVoiceMode": "Continuous voice mode"
+  "continuousVoiceMode": "Continuous voice mode",
+  "clearHistory": "Clear history",
+  "clearHistoryTitle": "Clear conversation history?",
+  "clearHistoryBody": "All messages for this client ({{clientId}}) will be removed from this browser. This cannot be undone.",
+  "clearHistoryConfirm": "Clear",
+  "cancel": "Cancel"
 }

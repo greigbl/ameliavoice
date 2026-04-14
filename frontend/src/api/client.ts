@@ -1,10 +1,30 @@
 import axios from 'axios'
+import { clearAuthSession } from '../state/authSession'
 
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
   timeout: 60000,
+  withCredentials: true,
 })
+
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (
+      typeof window !== 'undefined' &&
+      err?.response?.status === 401 &&
+      !window.location.pathname.startsWith('/login')
+    ) {
+      const url = String(err.config?.url ?? '')
+      if (!url.includes('/auth/me')) {
+        clearAuthSession()
+        window.location.assign('/login')
+      }
+    }
+    return Promise.reject(err)
+  }
+)
 
 export interface TurnLatency {
   stt_ms: number
@@ -92,6 +112,33 @@ export interface HealthResponse {
 export async function health(): Promise<HealthResponse> {
   const { data } = await api.get<HealthResponse>('/health')
   return data
+}
+
+export interface AuthMeResponse {
+  authenticated: boolean
+  auth_disabled?: boolean
+  username?: string
+  client_id?: string
+  /** When true, server has HIDE_SIDEBAR set; app should not show the settings sidebar. */
+  hide_sidebar?: boolean
+}
+
+export async function authMe(): Promise<AuthMeResponse> {
+  const { data } = await api.get<AuthMeResponse>('/auth/me')
+  return data
+}
+
+export async function authLogin(username: string, password: string): Promise<{
+  ok: boolean
+  username: string
+  client_id: string
+}> {
+  const { data } = await api.post('/auth/login', { username, password })
+  return data
+}
+
+export async function authLogout(): Promise<void> {
+  await api.post('/auth/logout')
 }
 
 /** Signal that the voice session should end (close listening). Call when agent returns end_conversation. */
